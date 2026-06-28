@@ -33,6 +33,7 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
   const path = opts.path ?? '/presence'
   const heartbeatInterval = opts.heartbeatInterval ?? 15_000
   const batchWindow = opts.batchWindow ?? 50
+  const ttl = heartbeatInterval * 3
 
   const rooms = new Map<string, RoomState>()
   const wss = new WebSocketServer({ server: opts.server })
@@ -83,6 +84,43 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
     const state = roomState(room)
     let conn: Connection | null = null
 
+    const handle = async (msg: ReturnType<typeof parseClientMessage>) => {
+      const now = Date.now()
+      switch (msg.type) {
+        case 'join': {
+          conn = { clientId: msg.clientId, room, socket }
+          state.sockets.set(msg.clientId, socket)
+          void fanout?.writePresence(room, msg.clientId, msg.meta, ttl)
+          // Read the cross-instance roster and send the snapshot BEFORE the local
+          // join diff is batched, so the joiner never misses peers on other instances.
+          // If the cross-instance read fails, fall back to this instance's own Room.
+          const peers = fanout
+            ? await fanout
+                .remoteSnapshot(room, msg.clientId)
+                .catch(() => state.room.snapshot().filter((p) => p.id !== msg.clientId))
+            : state.room.snapshot().filter((p) => p.id !== msg.clientId)
+          socket.send(encode({ type: 'snapshot', peers }))
+          state.batcher.add(state.room.join(msg.clientId, msg.meta, now))
+          break
+        }
+        case 'update':
+          if (conn) {
+            void fanout?.writePresence(room, conn.clientId, msg.meta, ttl)
+            state.batcher.add(state.room.update(conn.clientId, msg.meta, now))
+          }
+          break
+        case 'pong':
+          if (conn) {
+            state.room.touch(conn.clientId, now)
+            void fanout?.refresh(room, conn.clientId, ttl)
+          }
+          break
+      }
+    }
+
+    // Messages share a connection's state (conn, snapshot-before-join ordering), so
+    // process them strictly in arrival order even though `join` is now async.
+    let queue: Promise<void> = Promise.resolve()
     socket.on('message', (raw) => {
       let msg
       try {
@@ -91,32 +129,13 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
         if (err instanceof ProtocolError) return // ignore garbage, don't crash
         throw err
       }
-      const now = Date.now()
-      switch (msg.type) {
-        case 'join': {
-          conn = { clientId: msg.clientId, room, socket }
-          state.sockets.set(msg.clientId, socket)
-          socket.send(
-            encode({
-              type: 'snapshot',
-              peers: state.room.snapshot().filter((p) => p.id !== msg.clientId),
-            }),
-          )
-          state.batcher.add(state.room.join(msg.clientId, msg.meta, now))
-          break
-        }
-        case 'update':
-          if (conn) state.batcher.add(state.room.update(conn.clientId, msg.meta, now))
-          break
-        case 'pong':
-          if (conn) state.room.touch(conn.clientId, now)
-          break
-      }
+      queue = queue.then(() => handle(msg))
     })
 
     const drop = () => {
       if (!conn) return
       state.sockets.delete(conn.clientId)
+      void fanout?.removePresence(room, conn.clientId)
       state.batcher.add(state.room.leave(conn.clientId))
       conn = null
     }
@@ -128,11 +147,12 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
   const beat = setInterval(() => {
     const now = Date.now()
     const ping = encode({ type: 'ping' })
-    for (const state of rooms.values()) {
+    for (const [name, state] of rooms) {
       const stale: RoomChange = state.room.pruneStale(now, heartbeatInterval * 2)
       for (const id of stale.left ?? []) {
         state.sockets.get(id)?.terminate()
         state.sockets.delete(id)
+        void fanout?.removePresence(name, id)
       }
       if (stale.left?.length) state.batcher.add(stale)
       for (const socket of state.sockets.values()) socket.send(ping)
