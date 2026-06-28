@@ -129,9 +129,16 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
         if (err instanceof ProtocolError) return // ignore garbage, don't crash
         throw err
       }
-      queue = queue.then(() => handle(msg))
+      // A dead/closing socket can make a synchronous send throw mid-handle. Catch per
+      // link so one rejection doesn't poison the rest of this connection's queue (a
+      // rejected chain would silently drop every later message + raise an unhandled
+      // rejection). The only expected error here is send-after-close on a gone socket.
+      queue = queue.then(() => handle(msg)).catch(() => {})
     })
 
+    // If the socket closes before its queued `join` runs, conn is still null here, so
+    // drop skips removePresence and the later-running join leaves a presence key behind.
+    // That's intentional: TTL reclaims it, same self-heal as an instance crash.
     const drop = () => {
       if (!conn) return
       state.sockets.delete(conn.clientId)
