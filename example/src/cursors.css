@@ -5,7 +5,9 @@
 body {
   margin: 0;
   height: 100vh;
-  font: 14px/1.4 system-ui, sans-serif;
+  font:
+    14px/1.4 system-ui,
+    sans-serif;
   color: #1f2937;
   background: #f8fafc;
   cursor: crosshair;

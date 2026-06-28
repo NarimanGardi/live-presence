@@ -48,10 +48,15 @@ export function App() {
         <div
           key={p.id}
           className="cursor"
-          style={{ transform: `translate(${p.meta.cursor!.x}px, ${p.meta.cursor!.y}px)`, color: p.meta.color }}
+          style={{
+            transform: `translate(${p.meta.cursor!.x}px, ${p.meta.cursor!.y}px)`,
+            color: p.meta.color,
+          }}
         >
           <Pointer />
-          <span className="label" style={{ background: p.meta.color }}>{p.meta.name}</span>
+          <span className="label" style={{ background: p.meta.color }}>
+            {p.meta.name}
+          </span>
         </div>
       ))}
     </main>
