@@ -4,7 +4,9 @@ import { Room } from '../src/server/room'
 describe('Room', () => {
   it('join adds a peer and reports it joined', () => {
     const room = new Room()
-    expect(room.join('a', { name: 'A' }, 1000)).toEqual({ joined: [{ id: 'a', meta: { name: 'A' } }] })
+    expect(room.join('a', { name: 'A' }, 1000)).toEqual({
+      joined: [{ id: 'a', meta: { name: 'A' } }],
+    })
     expect(room.size).toBe(1)
   })
 
