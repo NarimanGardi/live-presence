@@ -38,7 +38,7 @@ That's the whole surface: `createPresenceServer` on the back end, `usePresence` 
 
 ## Why this exists
 
-I built and ran the real-time pipeline behind [Torliga](https://torliga.com) — live football scores and a live viewer count next to each match. During a big game the room is loud: thousands of people join in a minute, the score and minute tick constantly, and the viewer count is changing the whole time.
+I built and ran the real-time pipeline behind Torliga — live football scores and a live viewer count next to each match. During a big game the room is loud: a crowd piles in within a minute of kickoff, the score and minute tick constantly, and the viewer count moves the whole time.
 
 The first version did the obvious thing: broadcast every event to everyone. It worked in testing and fell over on the first real match. The problem isn't the steady state, it's the churn — a goal goes in, half the room reacts at once, everyone's client sends something, and you fan all of that back out to everyone. The naive loop turns N clients into N² messages right when you can least afford it.
 
