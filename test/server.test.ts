@@ -73,4 +73,17 @@ describe('createPresenceServer', () => {
     a.ws.close()
     b.ws.close()
   })
+
+  it('reaps a room once its last client leaves', async () => {
+    const url = await start()
+    const a = open(url)
+    await a.ready
+    a.ws.send(encode({ type: 'join', clientId: 'a', meta: { name: 'A' } }))
+    await wait(40)
+    expect(presence.roomCount()).toBe(1)
+
+    a.ws.close()
+    await wait(200) // past a prune+reap tick (heartbeatInterval 80)
+    expect(presence.roomCount()).toBe(0)
+  })
 })

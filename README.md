@@ -66,7 +66,7 @@ That runs the presence server and the example client together. Open two browser 
 
 **Connection lifecycle.** A client opens a WebSocket to `…/presence/<room>` and sends a `join` with a `clientId` it generates and a `meta` object (whatever presence payload you want — a name, a color, a cursor). The server replies with a one-time `snapshot` of everyone already in the room, then streams `diff` messages (`joined` / `updated` / `left`) as things change. The client keeps a local map of peers and applies diffs to it. When the socket closes — tab closed, network dropped, server hung up on it — the server emits a `left` for that client.
 
-**Heartbeat, at the application level.** The server sends a JSON `{"type":"ping"}` to every client on an interval; the client answers with `{"type":"pong"}`. A client that misses pongs for long enough gets pruned and terminated, and a `left` goes out for it. This is a JSON ping/pong in the protocol, *not* a WebSocket protocol-level ping frame, and that's deliberate: a browser's `WebSocket` API gives JavaScript no way to send a ping frame or observe a pong, so a protocol-frame heartbeat is invisible to the client half of the system. An app-level ping is the only heartbeat both ends can actually see — and it's trivial to drive in a test.
+**Heartbeat, at the application level.** The server sends a JSON `{"type":"ping"}` to every client on an interval; the client answers with `{"type":"pong"}`. A client that misses pongs for long enough gets pruned and terminated, and a `left` goes out for it. This is a JSON ping/pong in the protocol, _not_ a WebSocket protocol-level ping frame, and that's deliberate: a browser's `WebSocket` API gives JavaScript no way to send a ping frame or observe a pong, so a protocol-frame heartbeat is invisible to the client half of the system. An app-level ping is the only heartbeat both ends can actually see — and it's trivial to drive in a test.
 
 **Ephemeral state and diffs.** Presence is per-connection and lives in memory; there is no history and nothing to persist. A fresh joiner gets a full snapshot once, and everything after that is a diff. Sending snapshots on every change is what melts under churn — the diff stream is the point.
 
@@ -96,13 +96,13 @@ With no `redis` option the publish/subscribe and reconcile paths are simply neve
 
 ## Design decisions
 
-**The client owns its identity.** The `clientId` is generated on the client (`crypto.randomUUID()`), not assigned by the server. So when a connection blips and the client reconnects, it re-`join`s under the same id and re-attaches as the same person rather than showing up as a stranger. The cost is that you trust the client's id; for presence that's fine — see *Limitations* on auth.
+**The client owns its identity.** The `clientId` is generated on the client (`crypto.randomUUID()`), not assigned by the server. So when a connection blips and the client reconnects, it re-`join`s under the same id and re-attaches as the same person rather than showing up as a stranger. The cost is that you trust the client's id; for presence that's fine — see _Limitations_ on auth.
 
 **Reconcile instead of Redis keyspace notifications.** Redis can fire an event when a key expires, which would be a tidier way to learn a ghost has died. I chose a periodic reconcile loop instead, because keyspace notifications are off by default and many managed Redis providers don't let you turn them on. Polling the surviving keys works everywhere a plain Redis does, which matters more here than elegance.
 
 **Throttle and batch windows are small on purpose.** The client throttle defaults to 50ms (so a client tops out around 20 updates/sec) and the server batch window defaults to 50ms. Small enough that presence still feels live, large enough that a burst collapses into a few messages instead of a storm. Both are options if your room behaves differently.
 
-**The connection is created once per `url`.** The React hook spins up its client the first time it sees a `url` and tears it down when the `url` changes or the component unmounts. Changing the *other* options (`initial`, `throttleMs`, `maxBackoffMs`) after mount has no effect — they're read when the client is constructed. Reconnecting on every render would thrash the socket, so the `url` is the only dependency that rebuilds it. Set those options once.
+**The connection is created once per `url`.** The React hook spins up its client the first time it sees a `url` and tears it down when the `url` changes or the component unmounts. Changing the _other_ options (`initial`, `throttleMs`, `maxBackoffMs`) after mount has no effect — they're read when the client is constructed. Reconnecting on every render would thrash the socket, so the `url` is the only dependency that rebuilds it. Set those options once.
 
 ## Limitations / not handled
 
@@ -120,7 +120,7 @@ This is a presence primitive, not a real-time platform. On purpose, it does not 
 If you need production multiplayer with stored state and conflict resolution, reach for a real platform — that's not what this is. The honest map:
 
 - **[Pusher](https://pusher.com)** (presence channels) and **[Ably](https://ably.com)** — hosted real-time messaging with presence built in.
-- **[Liveblocks](https://liveblocks.io)** — presence *and* synced storage for multiplayer UIs; the closest thing to "presence + the document".
+- **[Liveblocks](https://liveblocks.io)** — presence _and_ synced storage for multiplayer UIs; the closest thing to "presence + the document".
 - **[Supabase Realtime](https://supabase.com/realtime)** — presence and broadcast on top of Postgres.
 - **[Soketi](https://soketi.app)** and **[Laravel Reverb](https://reverb.laravel.com)** — self-hosted servers that speak the Pusher protocol, if you want self-hosting with an existing client ecosystem.
 - **[PartyKit](https://www.partykit.io)** — rooms as edge-deployed stateful objects.

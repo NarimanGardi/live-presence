@@ -15,6 +15,8 @@ export interface PresenceServerOptions {
 
 export interface PresenceServer {
   close(): Promise<void>
+  /** Number of rooms currently held in memory. Empty rooms are reaped each tick. */
+  roomCount(): number
 }
 
 interface Connection {
@@ -177,6 +179,15 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
       if (stale.left?.length) state.batcher.add(stale)
       for (const socket of state.sockets.values()) socket.send(ping)
     }
+    // Reap rooms nobody is in anymore so the map (and this loop) doesn't grow with
+    // every distinct path that's ever been visited. A room with remote peers on
+    // another instance must stay. Snapshot the entries first — deleting mid-iteration.
+    for (const [name, state] of [...rooms]) {
+      if (state.sockets.size === 0 && state.remoteIds.size === 0) {
+        state.batcher.dispose()
+        rooms.delete(name)
+      }
+    }
   }, heartbeatInterval)
   beat.unref?.()
 
@@ -206,6 +217,7 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
   reconcile?.unref?.()
 
   return {
+    roomCount: () => rooms.size,
     async close() {
       clearInterval(beat)
       if (reconcile) clearInterval(reconcile)
