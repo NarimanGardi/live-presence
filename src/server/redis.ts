@@ -64,6 +64,14 @@ export class RedisFanout {
     }
   }
 
+  // The ids whose TTL keys still exist — Redis's truth about who's present. The
+  // reconcile loop diffs this against what each instance believes to evict ghosts
+  // left behind by a crashed instance that never published `left`.
+  async liveIds(room: string): Promise<Set<string>> {
+    const peers = await this.remoteSnapshot(room, '')
+    return new Set(peers.map((p) => p.id))
+  }
+
   async remoteSnapshot(room: string, excludeId: string): Promise<Peer[]> {
     const prefix = metaPrefix(room)
     const peers: Peer[] = []

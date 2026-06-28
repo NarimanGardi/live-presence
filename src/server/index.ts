@@ -27,6 +27,10 @@ interface RoomState {
   room: Room
   batcher: DiffBatcher
   sockets: Map<string, WebSocket>
+  // Peers we learned about purely through remote fan-out diffs (hosted on other
+  // instances). Reconcile uses these — they have no local socket and no Room entry,
+  // so a crashed instance's TTL expiry is the only signal they've gone.
+  remoteIds: Set<string>
 }
 
 export function createPresenceServer(opts: PresenceServerOptions): PresenceServer {
@@ -53,7 +57,12 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
         broadcastLocal(name, diff)
         fanout?.publish(name, diff)
       })
-      state = { room: new Room(), batcher, sockets: new Map<string, WebSocket>() }
+      state = {
+        room: new Room(),
+        batcher,
+        sockets: new Map<string, WebSocket>(),
+        remoteIds: new Set<string>(),
+      }
       rooms.set(name, state)
     }
     return state
@@ -61,9 +70,13 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
 
   // Diffs from other instances reach our local sockets only. We don't add them
   // to the local Room or re-publish them — remote clients hear it from their own
-  // instance. Cross-instance snapshot-on-join arrives in a later task.
+  // instance. We do track which remote peers exist (remoteIds) so reconcile can
+  // notice when a crashed instance's peers vanish from Redis without a `left`.
   fanout?.onRemote((name, diff) => {
-    roomState(name)
+    const state = roomState(name)
+    for (const p of diff.joined ?? []) state.remoteIds.add(p.id)
+    for (const p of diff.updated ?? []) state.remoteIds.add(p.id)
+    for (const id of diff.left ?? []) state.remoteIds.delete(id)
     broadcastLocal(name, diff)
   })
 
@@ -167,9 +180,35 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
   }, heartbeatInterval)
   beat.unref?.()
 
+  // Ghost cleanup: when a whole instance crashes it never publishes `left` for its
+  // clients, but their presence keys carry a TTL and expire on their own. We turn
+  // that expiry into `left` events by periodically diffing what we believe is
+  // present against Redis's surviving keys, rather than relying on keyspace
+  // notifications (which many managed Redis providers disable). Local sockets are
+  // never evicted here — the heartbeat/prune loop owns those.
+  const reconcile = fanout
+    ? setInterval(() => {
+        void (async () => {
+          for (const [name, state] of rooms) {
+            const known = new Set<string>([...state.sockets.keys(), ...state.remoteIds])
+            if (known.size === 0) continue
+            const live = await fanout.liveIds(name)
+            const gone = [...known].filter((id) => !live.has(id) && !state.sockets.has(id))
+            if (gone.length === 0) continue
+            for (const id of gone) state.remoteIds.delete(id)
+            broadcastLocal(name, { left: gone })
+          }
+          // A read racing a closing connection (shutdown) rejects; ignore and let
+          // the next tick resync — never crash the process on a transient Redis blip.
+        })().catch(() => {})
+      }, heartbeatInterval)
+    : null
+  reconcile?.unref?.()
+
   return {
     async close() {
       clearInterval(beat)
+      if (reconcile) clearInterval(reconcile)
       for (const state of rooms.values()) state.batcher.dispose()
       await fanout?.close()
       await new Promise<void>((resolve, reject) =>
