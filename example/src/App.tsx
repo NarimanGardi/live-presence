@@ -39,8 +39,14 @@ export function App() {
         <span className={connected ? 'dot on' : 'dot'} />
         <strong>{others.length + 1}</strong> here
         <div className="avatars">
-          {[me, ...others.map((o) => o.meta)].map((m, i) => (
-            <span key={i} className="avatar" style={{ background: m.color }} title={m.name} />
+          <span className="avatar" style={{ background: me.color }} title={me.name} />
+          {others.map((o) => (
+            <span
+              key={o.id}
+              className="avatar"
+              style={{ background: o.meta.color }}
+              title={o.meta.name}
+            />
           ))}
         </div>
       </header>
