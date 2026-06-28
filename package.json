@@ -1,6 +1,6 @@
 {
   "name": "live-presence",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "description": "Self-hostable real-time presence: who's here and what they're doing, right now.",
   "type": "module",
   "license": "MIT",
