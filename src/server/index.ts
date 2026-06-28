@@ -3,6 +3,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { encode, parseClientMessage, ProtocolError, type RoomChange } from '../protocol'
 import { Room } from './room'
 import { DiffBatcher } from './batcher'
+import { RedisFanout } from './redis'
 
 export interface PresenceServerOptions {
   server: HttpServer
@@ -35,20 +36,35 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
 
   const rooms = new Map<string, RoomState>()
   const wss = new WebSocketServer({ server: opts.server })
+  const fanout = opts.redis ? new RedisFanout(opts.redis.url) : null
+
+  function broadcastLocal(name: string, diff: RoomChange) {
+    const state = rooms.get(name)
+    if (!state) return
+    const payload = encode({ type: 'diff', ...diff })
+    for (const socket of state.sockets.values()) socket.send(payload)
+  }
 
   function roomState(name: string): RoomState {
     let state = rooms.get(name)
     if (!state) {
-      const sockets = new Map<string, WebSocket>()
       const batcher = new DiffBatcher(batchWindow, (diff) => {
-        const payload = encode({ type: 'diff', ...diff })
-        for (const socket of sockets.values()) socket.send(payload)
+        broadcastLocal(name, diff)
+        fanout?.publish(name, diff)
       })
-      state = { room: new Room(), batcher, sockets }
+      state = { room: new Room(), batcher, sockets: new Map<string, WebSocket>() }
       rooms.set(name, state)
     }
     return state
   }
+
+  // Diffs from other instances reach our local sockets only. We don't add them
+  // to the local Room or re-publish them — remote clients hear it from their own
+  // instance. Cross-instance snapshot-on-join arrives in a later task.
+  fanout?.onRemote((name, diff) => {
+    roomState(name)
+    broadcastLocal(name, diff)
+  })
 
   function roomFromUrl(url: string | undefined): string | null {
     if (!url) return null
@@ -128,6 +144,7 @@ export function createPresenceServer(opts: PresenceServerOptions): PresenceServe
     async close() {
       clearInterval(beat)
       for (const state of rooms.values()) state.batcher.dispose()
+      await fanout?.close()
       await new Promise<void>((resolve, reject) =>
         wss.close((err) => (err ? reject(err) : resolve())),
       )
