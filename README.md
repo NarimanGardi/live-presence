@@ -5,10 +5,12 @@ Self-hostable real-time presence: who's in a room and what they're doing, right 
 ```tsx
 import { usePresence } from 'live-presence/react'
 
+type Presence = { name: string; cursor: { x: number; y: number } | null }
+
 function Lobby() {
-  const { self, others, setPresence, connected } = usePresence({
+  const { others, setPresence, connected } = usePresence<Presence>({
     url: 'ws://localhost:3001/presence/lobby',
-    initial: { name: 'Ada', cursor: null as { x: number; y: number } | null },
+    initial: { name: 'Ada', cursor: null },
   })
 
   return (
@@ -54,7 +56,7 @@ npm install live-presence
 
 `react` is an optional peer dependency — only the `live-presence/react` entry needs it; the server runs without React.
 
-Attach the server to an HTTP server, point the hook at it, and you have presence. To see it working, the repo ships a live-cursors demo (cursor trails, a head-count, and avatars) that starts with one command:
+Attach the server to an HTTP server, point the hook at it, and you have presence. To see it working, the repo ships a live-cursors demo (named cursors, a head-count, and an avatar strip) that starts with one command:
 
 ```
 npm run demo
