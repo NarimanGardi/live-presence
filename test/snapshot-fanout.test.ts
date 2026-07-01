@@ -31,7 +31,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))))
 })
 
-async function startInstance(): Promise<string> {
+async function startInstance(room: string): Promise<string> {
   const http = createServer()
   servers.push(http)
   instances.push(
@@ -43,16 +43,19 @@ async function startInstance(): Promise<string> {
     }),
   )
   await new Promise<void>((r) => http.listen(0, r))
-  return `ws://localhost:${(http.address() as AddressInfo).port}/presence/lobby`
+  return `ws://localhost:${(http.address() as AddressInfo).port}/presence/${room}`
 }
 
 describe.skipIf(!(await redisAvailable()))('cross-instance snapshot', () => {
   it('a late joiner on another instance gets existing peers in its snapshot', async () => {
-    const url1 = await startInstance()
+    // Unique room per test: these files share one Redis, so a fixed room name
+    // would let their keys and pub/sub channels collide across parallel runs.
+    const room = `lobby-${crypto.randomUUID()}`
+    const url1 = await startInstance(room)
     const a = new PresenceClient({ url: url1, initial: { name: 'A' } })
     await wait(120) // a is registered in Redis
 
-    const url2 = await startInstance()
+    const url2 = await startInstance(room)
     const b = new PresenceClient({ url: url2, initial: { name: 'B' } })
     await wait(80) // shorter than a diff round-trip churn; snapshot must carry A
     expect(b.getState().others.map((p) => p.meta.name)).toContain('A')

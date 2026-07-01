@@ -33,7 +33,7 @@ afterEach(async () => {
   clients.splice(0).forEach((c) => c.disconnect())
 })
 
-async function startInstance(): Promise<string> {
+async function startInstance(room: string): Promise<string> {
   const http = createServer()
   servers.push(http)
   // Short heartbeat so ttl (3x = 360ms) and the reconcile tick (120ms) are fast.
@@ -46,12 +46,15 @@ async function startInstance(): Promise<string> {
     }),
   )
   await new Promise<void>((r) => http.listen(0, r))
-  return `ws://localhost:${(http.address() as AddressInfo).port}/presence/lobby`
+  return `ws://localhost:${(http.address() as AddressInfo).port}/presence/${room}`
 }
 
 describe.skipIf(!(await redisAvailable()))('ghost cleanup', () => {
   it('drops a peer whose instance crashed and stopped refreshing its TTL key', async () => {
-    const url1 = await startInstance()
+    // Unique room per test: these files share one Redis, so a fixed room name
+    // would let their keys and pub/sub channels collide across parallel runs.
+    const room = `lobby-${crypto.randomUUID()}`
+    const url1 = await startInstance(room)
     const a = new PresenceClient({ url: url1, initial: { name: 'A' } })
     await wait(120)
 
@@ -66,9 +69,9 @@ describe.skipIf(!(await redisAvailable()))('ghost cleanup', () => {
     clients.push(raw)
     const foreignInstance = crypto.randomUUID()
     const bMeta = { name: 'B' }
-    await raw.set('presence:meta:lobby:B', JSON.stringify(bMeta), 'PX', 360)
+    await raw.set(`presence:meta:${room}:B`, JSON.stringify(bMeta), 'PX', 360)
     await raw.publish(
-      'presence:room:lobby',
+      `presence:room:${room}`,
       JSON.stringify({ from: foreignInstance, change: { joined: [{ id: 'B', meta: bMeta }] } }),
     )
 
